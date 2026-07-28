@@ -52,13 +52,14 @@ export function setupScheduler(client: Client) {
         const missingList: string[] = [];
 
         for (const standup of todayStandups) {
-          const hasBlocker = standup.blockers && standup.blockers.trim().length > 0;
+          const rawBlocker = standup.blockers;
+          const hasBlocker = rawBlocker && rawBlocker !== 'None' && rawBlocker.trim().length > 0;
           const statusIcon = hasBlocker ? '⚠️' : '✅';
           const blockerText = hasBlocker
             ? ` (Blocker: ${
-                standup.blockers!.length > 60
-                  ? standup.blockers!.substring(0, 60) + '...'
-                  : standup.blockers
+                rawBlocker!.length > 60
+                  ? rawBlocker!.substring(0, 60) + '...'
+                  : rawBlocker
               })`
             : '';
           postedList.push(`${statusIcon} <@${standup.user_id}>${blockerText}`);

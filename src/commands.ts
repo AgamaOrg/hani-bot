@@ -537,8 +537,8 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
       today: todayText,
       tomorrow: tomorrowText,
       proof_of_output: proofOfOutputText,
-      project_blockers: projBlockerList.length > 0 ? projBlockerText : null,
-      outside_blockers: outBlockerList.length > 0 ? outBlockerText : null,
+      project_blockers: projBlockerList.length > 0 ? projBlockerText : 'None',
+      outside_blockers: outBlockerList.length > 0 ? outBlockerText : 'None',
       message_id: messageId,
       thread_id: threadId,
     });
@@ -624,7 +624,7 @@ export async function handleSelectMenuInteraction(interaction: StringSelectMenuI
         .setLabel('Blocker Detail / Impact')
         .setValue(blocker.text)
         .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true)
+        .setRequired(false)
         .setMaxLength(1000);
 
       modal.addComponents(
@@ -819,8 +819,10 @@ export async function handleTeamStatusCommand(interaction: ChatInputCommandInter
   const missingList: string[] = [];
 
   for (const standup of todayStandups) {
-    const projBlocker = standup.project_blockers || standup.blockers;
-    const outBlocker = standup.outside_blockers;
+    const rawProj = standup.project_blockers || standup.blockers;
+    const rawOut = standup.outside_blockers;
+    const projBlocker = rawProj && rawProj !== 'None' ? rawProj : null;
+    const outBlocker = rawOut && rawOut !== 'None' ? rawOut : null;
     const hasBlocker = Boolean(
       (projBlocker && projBlocker.trim().length > 0) ||
       (outBlocker && outBlocker.trim().length > 0)
