@@ -3,6 +3,7 @@ import {
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
+  Channel,
   ChatInputCommandInteraction,
   EmbedBuilder,
   Guild,
@@ -10,10 +11,12 @@ import {
   MessageFlags,
   ModalBuilder,
   ModalSubmitInteraction,
+  NewsChannel,
   SlashCommandBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
   StringSelectMenuOptionBuilder,
+  TextChannel,
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
@@ -483,7 +486,9 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
     ];
 
     const channelId = config.updateChannelId;
-    const channel = channelId ? await interaction.client.channels.fetch(channelId).catch(() => null) : null;
+    const channel: Channel | null = channelId
+      ? await interaction.client.channels.fetch(channelId).catch(() => null)
+      : null;
 
     let messageId: string | undefined;
     let threadId: string | undefined;
@@ -491,31 +496,30 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
     const existingRecord = getUserTodayStandup(userId, guildId, dateStr);
     const postedEmbed = buildSubmittedEmbed(displayName, dateStr, embedColor, fields);
 
-    if (existingRecord?.message_id && channel && 'messages' in channel) {
+    const messageChannel = channel instanceof TextChannel || channel instanceof NewsChannel ? channel : null;
+
+    if (existingRecord?.message_id && messageChannel) {
       try {
-        const existingMsg = await channel.messages.fetch(existingRecord.message_id);
+        const existingMsg = await messageChannel.messages.fetch(existingRecord.message_id);
         await existingMsg.edit({ embeds: [postedEmbed] });
         messageId = existingRecord.message_id ?? undefined;
         threadId = existingRecord.thread_id ?? undefined;
       } catch {
-        // Message deleted or inaccessible, send fresh
-        if (channel && channel.isTextBased() && 'send' in channel) {
-          const sentMsg = await channel.send({ embeds: [postedEmbed] });
-          messageId = sentMsg.id;
-          if ('startThread' in sentMsg) {
-            try {
-              const thread = await sentMsg.startThread({
-                name: `${displayName} — ${dateStr}`,
-                autoArchiveDuration: 1440,
-              });
-              threadId = thread.id;
-            } catch (threadErr) {
-              console.error('Failed to create feedback thread:', threadErr);
-            }
+        const sentMsg = await messageChannel.send({ embeds: [postedEmbed] });
+        messageId = sentMsg.id;
+        if ('startThread' in sentMsg) {
+          try {
+            const thread = await sentMsg.startThread({
+              name: `${displayName} — ${dateStr}`,
+              autoArchiveDuration: 1440,
+            });
+            threadId = thread.id;
+          } catch (threadErr) {
+            console.error('Failed to create feedback thread:', threadErr);
           }
         }
       }
-    } else if (channel && channel.isTextBased() && 'send' in channel) {
+    } else if (channel instanceof TextChannel || channel instanceof NewsChannel) {
       try {
         const sentMsg = await channel.send({ embeds: [postedEmbed] });
         messageId = sentMsg.id;
@@ -988,7 +992,7 @@ export async function handleKpiReportCommand(interaction: ChatInputCommandIntera
     ? await interaction.client.channels.fetch(kpiChannelId).catch(() => null)
     : null;
 
-  if (kpiChannel && kpiChannel.isTextBased() && 'send' in kpiChannel) {
+  if (kpiChannel instanceof TextChannel || kpiChannel instanceof NewsChannel) {
     await kpiChannel.send({ embeds: [embed] });
     await interaction.editReply({
       content: `✅ Monthly KPI report generated and published to <#${kpiChannelId}>.`,
