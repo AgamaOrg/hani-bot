@@ -63,6 +63,18 @@ export interface StandupRecord {
   created_at?: string;
 }
 
+export function getUserTodayStandup(
+  userId: string,
+  guildId: string,
+  dateStr?: string
+): StandupRecord | null {
+  const targetDate = dateStr || getTodayISOString();
+  const stmt = db.prepare(`
+    SELECT * FROM standups WHERE user_id = ? AND guild_id = ? AND date = ?
+  `);
+  return (stmt.get(userId, guildId, targetDate) as StandupRecord) || null;
+}
+
 export function hasSubmittedToday(userId: string, guildId: string, dateStr?: string): boolean {
   const targetDate = dateStr || getTodayISOString();
   const stmt = db.prepare(`

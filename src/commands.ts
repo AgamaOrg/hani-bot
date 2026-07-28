@@ -21,6 +21,7 @@ import { config } from './config.js';
 import {
   upsertStandup,
   hasSubmittedToday,
+  getUserTodayStandup,
   getTodayStandups,
   getActiveRoster,
   getUserHistory,
@@ -74,6 +75,38 @@ export function getOrCreateDraft(userId: string, guildId: string): StandupDraft 
 
 export function clearDraft(userId: string, guildId: string) {
   activeDrafts.delete(getDraftKey(userId, guildId));
+}
+
+function parseTodayFromRecord(today: string): TaskItem[] {
+  return today.split('\n')
+    .filter(l => l.startsWith('- '))
+    .map(l => {
+      const m = l.match(/^- (.+?)(?: \(Proof: (.+)\))?$/);
+      if (!m) return { category: 'today' as const, text: l.replace(/^- /, '') };
+      return { category: 'today' as const, text: m[1], proofUrl: m[2] || undefined };
+    });
+}
+
+function parseTomorrowFromRecord(tomorrow: string): TaskItem[] {
+  return tomorrow.split('\n')
+    .filter(l => l.startsWith('- '))
+    .map(l => {
+      const text = l.replace(/^- /, '');
+      return { category: 'tomorrow' as const, text };
+    });
+}
+
+function parseBlockersFromRecord(project?: string | null, outside?: string | null): BlockerItem[] {
+  const blockers: BlockerItem[] = [];
+  for (const line of (project || '').split('\n')) {
+    const m = line.match(/^- (.+)$/);
+    if (m) blockers.push({ category: 'project', text: m[1] });
+  }
+  for (const line of (outside || '').split('\n')) {
+    const m = line.match(/^- (.+)$/);
+    if (m) blockers.push({ category: 'outside', text: m[1] });
+  }
+  return blockers;
 }
 
 export function buildDraftEmbedAndComponents(draft: StandupDraft, displayName: string) {
@@ -151,6 +184,15 @@ export function buildDraftEmbedAndComponents(draft: StandupDraft, displayName: s
   return { embeds: [embed], components: [row1, row2] };
 }
 
+function buildSubmittedEmbed(displayName: string, dateStr: string, color: number, fields: { name: string; value: string }[]) {
+  return new EmbedBuilder()
+    .setTitle(`Daily Standup — ${dateStr}`)
+    .setColor(color)
+    .setAuthor({ name: displayName, iconURL: undefined })
+    .addFields(fields)
+    .setTimestamp();
+}
+
 export const slashCommands = [
   new SlashCommandBuilder()
     .setName('standup')
@@ -219,14 +261,14 @@ export async function handleStandupCommand(interaction: ChatInputCommandInteract
   const userId = interaction.user.id;
   const dateStr = getTodayISOString();
 
-  if (hasSubmittedToday(userId, guildId, dateStr)) {
-    await interaction.editReply({
-      content: `⚠️ **Once-Per-Day Limit Enforced**: You have already submitted your standup for today (${dateStr}). Submissions are limited to once per day.`,
-    });
-    return;
+  const existing = getUserTodayStandup(userId, guildId, dateStr);
+  const draft = getOrCreateDraft(userId, guildId);
+  if (existing) {
+    draft.todayTasks = parseTodayFromRecord(existing.today);
+    draft.tomorrowTasks = parseTomorrowFromRecord(existing.tomorrow);
+    draft.blockers = parseBlockersFromRecord(existing.project_blockers, existing.outside_blockers);
   }
 
-  const draft = getOrCreateDraft(userId, guildId);
   const member = interaction.member as GuildMember | null;
   const displayName = member?.displayName || interaction.user.displayName || interaction.user.username;
 
@@ -238,14 +280,6 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
   const guildId = interaction.guildId || 'default_guild';
   const userId = interaction.user.id;
   const dateStr = getTodayISOString();
-
-  if (hasSubmittedToday(userId, guildId, dateStr)) {
-    await interaction.reply({
-      content: `⚠️ **Once-Per-Day Limit Enforced**: You have already submitted your standup for today (${dateStr}). Submissions are limited to once per day.`,
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
 
   const draft = getOrCreateDraft(userId, guildId);
 
@@ -441,12 +475,6 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
     const hasAnyBlockers = draft.blockers.length > 0;
     const embedColor = hasAnyBlockers ? 0xffa500 : 0x00ff00;
 
-    const channelId = config.updateChannelId;
-    const channel = channelId ? await interaction.client.channels.fetch(channelId).catch(() => null) : null;
-
-    let messageId: string | undefined;
-    let threadId: string | undefined;
-
     const fields = [
       { name: 'What did you do today? (Project)', value: todayText },
       { name: 'What will you do tomorrow? (Project)', value: tomorrowText },
@@ -455,19 +483,40 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
       { name: 'Outside Project Blockers', value: outBlockerText },
     ];
 
-    const embed = new EmbedBuilder()
-      .setTitle(`Daily Standup — ${dateStr}`)
-      .setColor(embedColor)
-      .setAuthor({
-        name: displayName,
-        iconURL: interaction.user.displayAvatarURL(),
-      })
-      .addFields(fields)
-      .setTimestamp();
+    const channelId = config.updateChannelId;
+    const channel = channelId ? await interaction.client.channels.fetch(channelId).catch(() => null) : null;
 
-    if (channel && channel.isTextBased() && 'send' in channel) {
+    let messageId: string | undefined;
+    let threadId: string | undefined;
+
+    const existingRecord = getUserTodayStandup(userId, guildId, dateStr);
+    const postedEmbed = buildSubmittedEmbed(displayName, dateStr, embedColor, fields);
+
+    if (existingRecord?.message_id && channel && 'messages' in channel) {
       try {
-        const sentMsg = await channel.send({ embeds: [embed] });
+        const existingMsg = await channel.messages.fetch(existingRecord.message_id);
+        await existingMsg.edit({ embeds: [postedEmbed] });
+        messageId = existingRecord.message_id ?? undefined;
+        threadId = existingRecord.thread_id ?? undefined;
+      } catch {
+        // Message deleted or inaccessible, send fresh
+        const sentMsg = await channel.send({ embeds: [postedEmbed] });
+        messageId = sentMsg.id;
+        if ('startThread' in sentMsg) {
+          try {
+            const thread = await sentMsg.startThread({
+              name: `${displayName} — ${dateStr}`,
+              autoArchiveDuration: 1440,
+            });
+            threadId = thread.id;
+          } catch (threadErr) {
+            console.error('Failed to create feedback thread:', threadErr);
+          }
+        }
+      }
+    } else if (channel && channel.isTextBased() && 'send' in channel) {
+      try {
+        const sentMsg = await channel.send({ embeds: [postedEmbed] });
         messageId = sentMsg.id;
 
         if ('startThread' in sentMsg) {
@@ -714,8 +763,8 @@ export async function handleHelpCommand(interaction: ChatInputCommandInteraction
           '5. Click **[🚀 Submit Standup]** to post your daily update!',
       },
       {
-        name: '⏰ Once-Per-Day Limit Rule',
-        value: 'You can only submit your standup **once a day**. Double submissions are blocked to maintain accurate daily logs.',
+        name: '📝 Editing After Submit',
+        value: 'You can run `/standup` again after submitting to edit your update. Re-submitting will update the existing post in the team channel.',
       },
       {
         name: '🚧 Categorized Blockers',
