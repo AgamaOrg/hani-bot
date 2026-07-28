@@ -3,6 +3,7 @@ import {
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
+  Channel,
   ChatInputCommandInteraction,
   EmbedBuilder,
   Guild,
@@ -10,10 +11,12 @@ import {
   MessageFlags,
   ModalBuilder,
   ModalSubmitInteraction,
+  NewsChannel,
   SlashCommandBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
   StringSelectMenuOptionBuilder,
+  TextChannel,
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
@@ -483,7 +486,9 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
     ];
 
     const channelId = config.updateChannelId;
-    const channel = channelId ? await interaction.client.channels.fetch(channelId).catch(() => null) : null;
+    const channel: Channel | null = channelId
+      ? await interaction.client.channels.fetch(channelId).catch(() => null)
+      : null;
 
     let messageId: string | undefined;
     let threadId: string | undefined;
@@ -491,15 +496,16 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
     const existingRecord = getUserTodayStandup(userId, guildId, dateStr);
     const postedEmbed = buildSubmittedEmbed(displayName, dateStr, embedColor, fields);
 
-    if (existingRecord?.message_id && channel && 'messages' in channel) {
+    const isGuildTextChannel = channel instanceof TextChannel || channel instanceof NewsChannel;
+
+    if (existingRecord?.message_id && isGuildTextChannel) {
       try {
         const existingMsg = await channel.messages.fetch(existingRecord.message_id);
         await existingMsg.edit({ embeds: [postedEmbed] });
         messageId = existingRecord.message_id ?? undefined;
         threadId = existingRecord.thread_id ?? undefined;
       } catch {
-        // Message deleted or inaccessible, send fresh
-        if (channel && channel.isTextBased() && 'send' in channel) {
+        if (channel.isSendable()) {
           const sentMsg = await channel.send({ embeds: [postedEmbed] });
           messageId = sentMsg.id;
           if ('startThread' in sentMsg) {
@@ -515,7 +521,7 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
           }
         }
       }
-    } else if (channel && channel.isTextBased() && 'send' in channel) {
+    } else if (channel?.isSendable()) {
       try {
         const sentMsg = await channel.send({ embeds: [postedEmbed] });
         messageId = sentMsg.id;
@@ -988,7 +994,7 @@ export async function handleKpiReportCommand(interaction: ChatInputCommandIntera
     ? await interaction.client.channels.fetch(kpiChannelId).catch(() => null)
     : null;
 
-  if (kpiChannel && kpiChannel.isTextBased() && 'send' in kpiChannel) {
+  if (kpiChannel?.isSendable()) {
     await kpiChannel.send({ embeds: [embed] });
     await interaction.editReply({
       content: `✅ Monthly KPI report generated and published to <#${kpiChannelId}>.`,
