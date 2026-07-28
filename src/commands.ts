@@ -1,31 +1,30 @@
 import {
-  SlashCommandBuilder,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
-  ChatInputCommandInteraction,
   ButtonInteraction,
-  ModalSubmitInteraction,
-  StringSelectMenuInteraction,
-  StringSelectMenuBuilder,
-  StringSelectMenuOptionBuilder,
-  GuildMember,
+  ButtonStyle,
+  ChatInputCommandInteraction,
+  EmbedBuilder,
   Guild,
+  GuildMember,
   MessageFlags,
+  ModalBuilder,
+  ModalSubmitInteraction,
+  SlashCommandBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
+  StringSelectMenuOptionBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } from 'discord.js';
 import { config } from './config.js';
 import {
-  upsertStandup,
-  hasSubmittedToday,
-  getUserTodayStandup,
-  getTodayStandups,
   getActiveRoster,
-  getUserHistory,
   getTodayISOString,
+  getTodayStandups,
+  getUserHistory,
+  getUserTodayStandup,
+  upsertStandup
 } from './db.js';
 import { generateMonthlyKpiReport } from './kpi.js';
 
@@ -500,17 +499,19 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
         threadId = existingRecord.thread_id ?? undefined;
       } catch {
         // Message deleted or inaccessible, send fresh
-        const sentMsg = await channel.send({ embeds: [postedEmbed] });
-        messageId = sentMsg.id;
-        if ('startThread' in sentMsg) {
-          try {
-            const thread = await sentMsg.startThread({
-              name: `${displayName} — ${dateStr}`,
-              autoArchiveDuration: 1440,
-            });
-            threadId = thread.id;
-          } catch (threadErr) {
-            console.error('Failed to create feedback thread:', threadErr);
+        if (channel && channel.isTextBased() && 'send' in channel) {
+          const sentMsg = await channel.send({ embeds: [postedEmbed] });
+          messageId = sentMsg.id;
+          if ('startThread' in sentMsg) {
+            try {
+              const thread = await sentMsg.startThread({
+                name: `${displayName} — ${dateStr}`,
+                autoArchiveDuration: 1440,
+              });
+              threadId = thread.id;
+            } catch (threadErr) {
+              console.error('Failed to create feedback thread:', threadErr);
+            }
           }
         }
       }
