@@ -166,20 +166,6 @@ export function getUserHistory(
   return stmt.all(guildId, userId, cutoffDate) as StandupRecord[];
 }
 
-export function getMonthlySubmissions(
-  guildId: string,
-  yearMonth: string
-): { user_id: string; submitted_days: number }[] {
-  const pattern = `${yearMonth}-%`;
-  const stmt = db.prepare(`
-    SELECT user_id, COUNT(DISTINCT date) as submitted_days
-    FROM standups
-    WHERE guild_id = ? AND date LIKE ?
-    GROUP BY user_id
-  `);
-  return stmt.all(guildId, pattern) as { user_id: string; submitted_days: number }[];
-}
-
 export function getRangeSubmissions(
   guildId: string,
   startDateStr: string,

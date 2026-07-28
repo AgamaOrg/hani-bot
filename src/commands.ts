@@ -31,18 +31,18 @@ import {
 } from './db.js';
 import { generateMonthlyKpiReport } from './kpi.js';
 
-export interface TaskItem {
+interface TaskItem {
   category: 'today' | 'tomorrow';
   text: string;
   proofUrl?: string;
 }
 
-export interface BlockerItem {
+interface BlockerItem {
   category: 'project' | 'outside';
   text: string;
 }
 
-export interface StandupDraft {
+interface StandupDraft {
   userId: string;
   guildId: string;
   dateStr: string;
@@ -53,12 +53,8 @@ export interface StandupDraft {
 
 const activeDrafts = new Map<string, StandupDraft>();
 
-export function getDraftKey(userId: string, guildId: string): string {
-  return `${guildId}:${userId}`;
-}
-
 export function getOrCreateDraft(userId: string, guildId: string): StandupDraft {
-  const key = getDraftKey(userId, guildId);
+  const key = `${guildId}:${userId}`;
   const dateStr = getTodayISOString();
   let draft = activeDrafts.get(key);
   if (!draft || draft.dateStr !== dateStr) {
@@ -76,25 +72,17 @@ export function getOrCreateDraft(userId: string, guildId: string): StandupDraft 
 }
 
 export function clearDraft(userId: string, guildId: string) {
-  activeDrafts.delete(getDraftKey(userId, guildId));
+  activeDrafts.delete(`${guildId}:${userId}`);
 }
 
-function parseTodayFromRecord(today: string): TaskItem[] {
-  return today.split('\n')
+function parseTasksFromRecord(text: string, category: 'today' | 'tomorrow'): TaskItem[] {
+  return text.split('\n')
     .filter(l => l.startsWith('- '))
     .map(l => {
       const m = l.match(/^- (.+?)(?: \(Proof: (.+)\))?$/);
-      if (!m) return { category: 'today' as const, text: l.replace(/^- /, '') };
-      return { category: 'today' as const, text: m[1], proofUrl: m[2] || undefined };
-    });
-}
-
-function parseTomorrowFromRecord(tomorrow: string): TaskItem[] {
-  return tomorrow.split('\n')
-    .filter(l => l.startsWith('- '))
-    .map(l => {
-      const text = l.replace(/^- /, '');
-      return { category: 'tomorrow' as const, text };
+      return m
+        ? { category, text: m[1], proofUrl: m[2] || undefined }
+        : { category, text: l.replace(/^- /, '') };
     });
 }
 
@@ -266,8 +254,8 @@ export async function handleStandupCommand(interaction: ChatInputCommandInteract
   const existing = getUserTodayStandup(userId, guildId, dateStr);
   const draft = getOrCreateDraft(userId, guildId);
   if (existing) {
-    draft.todayTasks = parseTodayFromRecord(existing.today);
-    draft.tomorrowTasks = parseTomorrowFromRecord(existing.tomorrow);
+    draft.todayTasks = parseTasksFromRecord(existing.today, 'today');
+    draft.tomorrowTasks = parseTasksFromRecord(existing.tomorrow, 'tomorrow');
     draft.blockers = parseBlockersFromRecord(existing.project_blockers, existing.outside_blockers);
   }
 
