@@ -3,8 +3,9 @@ import path from 'path';
 
 const dbPath = path.resolve(process.cwd(), 'standup_bot.db');
 export const db = new Database(dbPath);
+console.log(`[db] SQLite database at: ${dbPath}`);
 
-db.pragma('journal_mode = WAL');
+db.pragma('journal_mode = DELETE');
 
 // Initialize schema
 db.exec(`

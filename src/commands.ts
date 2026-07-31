@@ -530,18 +530,28 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
       }
     }
 
-    upsertStandup({
-      user_id: userId,
-      guild_id: guildId,
-      date: dateStr,
-      today: todayText,
-      tomorrow: tomorrowText,
-      proof_of_output: proofOfOutputText,
-      project_blockers: projBlockerList.length > 0 ? projBlockerText : 'None',
-      outside_blockers: outBlockerList.length > 0 ? outBlockerText : 'None',
-      message_id: messageId,
-      thread_id: threadId,
-    });
+    try {
+      upsertStandup({
+        user_id: userId,
+        guild_id: guildId,
+        date: dateStr,
+        today: todayText,
+        tomorrow: tomorrowText,
+        proof_of_output: proofOfOutputText,
+        project_blockers: projBlockerList.length > 0 ? projBlockerText : 'None',
+        outside_blockers: outBlockerList.length > 0 ? outBlockerText : 'None',
+        message_id: messageId,
+        thread_id: threadId,
+      });
+    } catch (err) {
+      console.error(`[Standup] DB save failed for userId=${userId}, guildId=${guildId}, dateStr=${dateStr}:`, err);
+      await interaction.editReply({
+        content: '⚠️ Your standup was **posted to the team channel**, but **failed to save to the database**. Please notify the bot admin.',
+        embeds: [],
+        components: [],
+      });
+      return;
+    }
 
     clearDraft(userId, guildId);
 

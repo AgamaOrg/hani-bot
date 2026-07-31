@@ -76,8 +76,13 @@ client.on('interactionCreate', async (interaction) => {
     }
   } catch (err) {
     console.error(`Error handling interaction ${interaction.id}:`, err);
-    if (interaction.isRepliable() && !interaction.replied) {
+    if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
       await interaction.reply({
+        content: 'An error occurred while processing your request.',
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => null);
+    } else if (interaction.isRepliable()) {
+      await interaction.followUp({
         content: 'An error occurred while processing your request.',
         flags: MessageFlags.Ephemeral,
       }).catch(() => null);
