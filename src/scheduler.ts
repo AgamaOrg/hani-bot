@@ -45,7 +45,7 @@ export function setupScheduler(client: Client) {
           config.rosterWindowDays
         );
 
-        const todayStandups = getTodayStandups(guildId, todayStr);
+        const todayStandups = await getTodayStandups(guildId, todayStr);
         const submittedMap = new Map(todayStandups.map((s) => [s.user_id, s]));
 
         const postedList: string[] = [];
@@ -127,7 +127,7 @@ export function setupScheduler(client: Client) {
           config.rosterWindowDays
         );
 
-        const kpiData = generateMonthlyKpiReport(
+        const kpiData = await generateMonthlyKpiReport(
           guildId,
           currentYear,
           currentMonth,

@@ -1,9 +1,6 @@
 import assert from 'assert';
-import fs from 'fs';
-import path from 'path';
 import { loadConfig } from './config.js';
 import {
-  db,
   upsertStandup,
   hasSubmittedToday,
   getTodayStandups,
@@ -20,6 +17,7 @@ import {
   generateMonthlyKpiReport,
 } from './kpi.js';
 
+async function main() {
 console.log('=== RUNNING BOT END-TO-END TESTS ===');
 
 // 1. Test Config Parser
@@ -36,11 +34,8 @@ const userId1 = 'user_111';
 const userId2 = 'user_222';
 const dateToday = getTodayISOString();
 
-// Clear test data
-db.prepare(`DELETE FROM standups WHERE guild_id = ?`).run(guildId);
-
 // Test Upsert Standup
-const record1 = upsertStandup({
+const record1 = await upsertStandup({
   user_id: userId1,
   guild_id: guildId,
   date: dateToday,
@@ -60,16 +55,16 @@ assert.strictEqual(record1.tomorrow, '- Working on feature B');
 assert.strictEqual(record1.proof_of_output, 'https://github.com/org/repo/pull/1');
 
 // Test hasSubmittedToday
-assert.strictEqual(hasSubmittedToday(userId1, guildId, dateToday), true);
-assert.strictEqual(hasSubmittedToday('user_999', guildId, dateToday), false);
+assert.strictEqual(await hasSubmittedToday(userId1, guildId, dateToday), true);
+assert.strictEqual(await hasSubmittedToday('user_999', guildId, dateToday), false);
 
 // Check today's standups
-const todayList = getTodayStandups(guildId, dateToday);
+const todayList = await getTodayStandups(guildId, dateToday);
 assert.strictEqual(todayList.length, 1);
 assert.strictEqual(todayList[0].user_id, userId1);
 
 // Add second user standup
-upsertStandup({
+await upsertStandup({
   user_id: userId2,
   guild_id: guildId,
   date: dateToday,
@@ -82,23 +77,23 @@ upsertStandup({
   feedback: null,
 });
 
-const todayList2 = getTodayStandups(guildId, dateToday);
+const todayList2 = await getTodayStandups(guildId, dateToday);
 assert.strictEqual(todayList2.length, 2);
 
 // Test Active Roster
-const roster = getActiveRoster(guildId, 14);
+const roster = await getActiveRoster(guildId, 14);
 assert.ok(roster.includes(userId1));
 assert.ok(roster.includes(userId2));
 
 // Test User History
-const historyUser1 = getUserHistory(guildId, userId1, 14);
+const historyUser1 = await getUserHistory(guildId, userId1, 14);
 assert.strictEqual(historyUser1.length, 1);
 assert.strictEqual(historyUser1[0].today, '- Finished feature A');
 assert.strictEqual(historyUser1[0].tomorrow, '- Working on feature B');
 
 // Test Range Submissions for 15th-to-14th cycle
 const pastDateStr = '2026-02-01';
-upsertStandup({
+await upsertStandup({
   user_id: userId1,
   guild_id: guildId,
   date: pastDateStr,
@@ -111,7 +106,7 @@ upsertStandup({
   feedback: null,
 });
 
-const febRangeSubmissions = getRangeSubmissions(guildId, '2026-01-15', '2026-02-14');
+const febRangeSubmissions = await getRangeSubmissions(guildId, '2026-01-15', '2026-02-14');
 assert.strictEqual(febRangeSubmissions.length, 1);
 assert.strictEqual(febRangeSubmissions[0].user_id, userId1);
 assert.strictEqual(febRangeSubmissions[0].submitted_days, 1);
@@ -139,7 +134,7 @@ assert.deepStrictEqual(evaluateKpiScore(14, 22), { score: 12, rating: 'Satisfact
 assert.deepStrictEqual(evaluateKpiScore(10, 22), { score: 8, rating: 'Needs Improvement', percentage: 45 });
 assert.deepStrictEqual(evaluateKpiScore(5, 22), { score: 4, rating: 'Unsatisfactory', percentage: 23 });
 
-const febReport = generateMonthlyKpiReport(guildId, 2026, 'feb', 14);
+const febReport = await generateMonthlyKpiReport(guildId, 2026, 'feb', 14);
 assert.strictEqual(febReport.businessDays, 22);
 assert.strictEqual(febReport.shortName, 'Feb');
 assert.ok(febReport.results.some((r) => r.userId === userId1));
@@ -190,7 +185,10 @@ assert.ok(updatedTodayField?.value.includes('Setup Database (Updated single line
 clearDraft(draftUser, guildId);
 console.log('✓ Draft & interactive buttons test passed.');
 
-// Cleanup test records
-db.prepare(`DELETE FROM standups WHERE guild_id = ?`).run(guildId);
-
 console.log('=== ALL TESTS PASSED SUCCESSFULLY! ===');
+}
+
+main().catch((err) => {
+  console.error('Test run failed:', err);
+  process.exit(1);
+});

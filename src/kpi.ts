@@ -170,17 +170,17 @@ export function evaluateKpiScore(
   return { score, rating, percentage };
 }
 
-export function generateMonthlyKpiReport(
+export async function generateMonthlyKpiReport(
   guildId: string,
   year: number,
   monthInput?: string | number | null,
   rosterWindowDays: number = 14,
   serverRosterIds?: string[]
-): MonthlyKpiReportData {
+): Promise<MonthlyKpiReportData> {
   const monthInfo = parseMonthInput(monthInput);
   const cutoffInfo = getCutoffPeriodBusinessDays(year, monthInfo.monthNumber);
 
-  const rangeSubmissions = getRangeSubmissions(guildId, cutoffInfo.startStr, cutoffInfo.endStr);
+  const rangeSubmissions = await getRangeSubmissions(guildId, cutoffInfo.startStr, cutoffInfo.endStr);
   const submissionMap = new Map<string, number>();
   for (const item of rangeSubmissions) {
     submissionMap.set(item.user_id, item.submitted_days);
@@ -189,7 +189,7 @@ export function generateMonthlyKpiReport(
   const defaultRoster =
     serverRosterIds && serverRosterIds.length > 0
       ? serverRosterIds
-      : getActiveRoster(guildId, rosterWindowDays);
+      : await getActiveRoster(guildId, rosterWindowDays);
 
   const allUserIds = new Set<string>([...defaultRoster, ...submissionMap.keys()]);
 

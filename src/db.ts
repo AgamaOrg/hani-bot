@@ -1,50 +1,17 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { createClient } from '@supabase/supabase-js';
 
-const dbPath = path.resolve(process.cwd(), 'standup_bot.db');
-export const db = new Database(dbPath);
-console.log(`[db] SQLite database at: ${dbPath}`);
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-db.pragma('journal_mode = DELETE');
-
-// Initialize schema
-db.exec(`
-  CREATE TABLE IF NOT EXISTS standups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    guild_id TEXT NOT NULL,
-    date TEXT NOT NULL,                  -- YYYY-MM-DD
-    today TEXT NOT NULL,                 -- What did you do today? (Bulleted, project tasks)
-    tomorrow TEXT NOT NULL,              -- What will you do tomorrow? (Bulleted, project tasks)
-    proof_of_output TEXT NOT NULL DEFAULT '', -- Proof of Output link
-    project_blockers TEXT,               -- Blockers in the project
-    outside_blockers TEXT,               -- Blockers outside the project
-    blockers TEXT,                       -- Legacy column
-    feedback TEXT,                       -- Legacy column
-    yesterday TEXT,                      -- Legacy column
-    message_id TEXT,
-    thread_id TEXT,
-    created_at TEXT NOT NULL,           -- ISO timestamp
-    UNIQUE(user_id, guild_id, date)
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+  throw new Error(
+    '[db] SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in the environment.'
   );
-`);
+}
 
-// Migrations for existing databases
-try {
-  db.exec(`ALTER TABLE standups ADD COLUMN tomorrow TEXT;`);
-} catch {}
-try {
-  db.exec(`ALTER TABLE standups ADD COLUMN feedback TEXT;`);
-} catch {}
-try {
-  db.exec(`ALTER TABLE standups ADD COLUMN proof_of_output TEXT NOT NULL DEFAULT '';`);
-} catch {}
-try {
-  db.exec(`ALTER TABLE standups ADD COLUMN project_blockers TEXT;`);
-} catch {}
-try {
-  db.exec(`ALTER TABLE standups ADD COLUMN outside_blockers TEXT;`);
-} catch {}
+export const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  auth: { persistSession: false },
+});
 
 export interface StandupRecord {
   id?: number;
@@ -64,28 +31,43 @@ export interface StandupRecord {
   created_at?: string;
 }
 
-export function getUserTodayStandup(
+export async function getUserTodayStandup(
   userId: string,
   guildId: string,
   dateStr?: string
-): StandupRecord | null {
+): Promise<StandupRecord | null> {
   const targetDate = dateStr || getTodayISOString();
-  const stmt = db.prepare(`
-    SELECT * FROM standups WHERE user_id = ? AND guild_id = ? AND date = ?
-  `);
-  return (stmt.get(userId, guildId, targetDate) as StandupRecord) || null;
+  const { data, error } = await supabase
+    .from('standups')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('guild_id', guildId)
+    .eq('date', targetDate)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as StandupRecord) || null;
 }
 
-export function hasSubmittedToday(userId: string, guildId: string, dateStr?: string): boolean {
+export async function hasSubmittedToday(
+  userId: string,
+  guildId: string,
+  dateStr?: string
+): Promise<boolean> {
   const targetDate = dateStr || getTodayISOString();
-  const stmt = db.prepare(`
-    SELECT COUNT(*) as cnt FROM standups WHERE user_id = ? AND guild_id = ? AND date = ?
-  `);
-  const result = stmt.get(userId, guildId, targetDate) as { cnt: number };
-  return result.cnt > 0;
+  const { data, error } = await supabase
+    .from('standups')
+    .select('user_id')
+    .eq('user_id', userId)
+    .eq('guild_id', guildId)
+    .eq('date', targetDate)
+    .maybeSingle();
+  if (error) throw error;
+  return data !== null;
 }
 
-export function upsertStandup(record: Omit<StandupRecord, 'id' | 'created_at'>): StandupRecord {
+export async function upsertStandup(
+  record: Omit<StandupRecord, 'id' | 'created_at'>
+): Promise<StandupRecord> {
   const createdAt = new Date().toISOString();
   const todayVal = record.today || record.yesterday || '';
   const tomorrowVal = record.tomorrow || '';
@@ -94,24 +76,7 @@ export function upsertStandup(record: Omit<StandupRecord, 'id' | 'created_at'>):
   const projBlockersVal = record.project_blockers ?? record.blockers ?? null;
   const outBlockersVal = record.outside_blockers ?? null;
 
-  const stmt = db.prepare(`
-    INSERT INTO standups (user_id, guild_id, date, yesterday, today, tomorrow, proof_of_output, project_blockers, outside_blockers, blockers, feedback, message_id, thread_id, created_at)
-    VALUES (@user_id, @guild_id, @date, @yesterday, @today, @tomorrow, @proof_of_output, @project_blockers, @outside_blockers, @blockers, @feedback, @message_id, @thread_id, @created_at)
-    ON CONFLICT(user_id, guild_id, date) DO UPDATE SET
-      yesterday = excluded.yesterday,
-      today = excluded.today,
-      tomorrow = excluded.tomorrow,
-      proof_of_output = excluded.proof_of_output,
-      project_blockers = excluded.project_blockers,
-      outside_blockers = excluded.outside_blockers,
-      blockers = excluded.blockers,
-      feedback = excluded.feedback,
-      message_id = COALESCE(excluded.message_id, standups.message_id),
-      thread_id = COALESCE(excluded.thread_id, standups.thread_id),
-      created_at = excluded.created_at
-  `);
-
-  stmt.run({
+  const row = {
     user_id: record.user_id,
     guild_id: record.guild_id,
     date: record.date,
@@ -126,59 +91,100 @@ export function upsertStandup(record: Omit<StandupRecord, 'id' | 'created_at'>):
     message_id: record.message_id ?? null,
     thread_id: record.thread_id ?? null,
     created_at: createdAt,
-  });
+  };
 
-  const getStmt = db.prepare(`
-    SELECT * FROM standups WHERE user_id = ? AND guild_id = ? AND date = ?
-  `);
-  return getStmt.get(record.user_id, record.guild_id, record.date) as StandupRecord;
+  const { data: existing, error: fetchError } = await supabase
+    .from('standups')
+    .select('message_id, thread_id')
+    .eq('user_id', record.user_id)
+    .eq('guild_id', record.guild_id)
+    .eq('date', record.date)
+    .maybeSingle();
+  if (fetchError) throw fetchError;
+
+  if (existing && row.message_id === null) row.message_id = existing.message_id;
+  if (existing && row.thread_id === null) row.thread_id = existing.thread_id;
+
+  const { data, error } = await supabase
+    .from('standups')
+    .upsert(row, { onConflict: 'user_id,guild_id,date' })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as StandupRecord;
 }
 
-export function getTodayStandups(guildId: string, dateStr?: string): StandupRecord[] {
+export async function getTodayStandups(
+  guildId: string,
+  dateStr?: string
+): Promise<StandupRecord[]> {
   const targetDate = dateStr || getTodayISOString();
-  const stmt = db.prepare(`
-    SELECT * FROM standups WHERE guild_id = ? AND date = ? ORDER BY id ASC
-  `);
-  return stmt.all(guildId, targetDate) as StandupRecord[];
+  const { data, error } = await supabase
+    .from('standups')
+    .select('*')
+    .eq('guild_id', guildId)
+    .eq('date', targetDate)
+    .order('id', { ascending: true });
+  if (error) throw error;
+  return (data as StandupRecord[]) || [];
 }
 
-export function getActiveRoster(guildId: string, windowDays: number = 14): string[] {
+export async function getActiveRoster(
+  guildId: string,
+  windowDays: number = 14
+): Promise<string[]> {
   const cutoffDate = getCutoffISOString(windowDays);
-  const stmt = db.prepare(`
-    SELECT DISTINCT user_id FROM standups WHERE guild_id = ? AND date >= ?
-  `);
-  const rows = stmt.all(guildId, cutoffDate) as { user_id: string }[];
-  return rows.map((r) => r.user_id);
+  const { data, error } = await supabase
+    .from('standups')
+    .select('user_id')
+    .eq('guild_id', guildId)
+    .gte('date', cutoffDate);
+  if (error) throw error;
+  const seen = new Set<string>();
+  for (const row of data || []) seen.add(row.user_id);
+  return [...seen];
 }
 
-export function getUserHistory(
+export async function getUserHistory(
   guildId: string,
   userId: string,
   days: number = 14
-): StandupRecord[] {
+): Promise<StandupRecord[]> {
   const cappedDays = Math.min(Math.max(days, 1), 60);
   const cutoffDate = getCutoffISOString(cappedDays);
-  const stmt = db.prepare(`
-    SELECT * FROM standups
-    WHERE guild_id = ? AND user_id = ? AND date >= ?
-    ORDER BY date DESC
-    LIMIT 60
-  `);
-  return stmt.all(guildId, userId, cutoffDate) as StandupRecord[];
+  const { data, error } = await supabase
+    .from('standups')
+    .select('*')
+    .eq('guild_id', guildId)
+    .eq('user_id', userId)
+    .gte('date', cutoffDate)
+    .order('date', { ascending: false })
+    .limit(60);
+  if (error) throw error;
+  return (data as StandupRecord[]) || [];
 }
 
-export function getRangeSubmissions(
+export async function getRangeSubmissions(
   guildId: string,
   startDateStr: string,
   endDateStr: string
-): { user_id: string; submitted_days: number }[] {
-  const stmt = db.prepare(`
-    SELECT user_id, COUNT(DISTINCT date) as submitted_days
-    FROM standups
-    WHERE guild_id = ? AND date >= ? AND date <= ?
-    GROUP BY user_id
-  `);
-  return stmt.all(guildId, startDateStr, endDateStr) as { user_id: string; submitted_days: number }[];
+): Promise<{ user_id: string; submitted_days: number }[]> {
+  const { data, error } = await supabase
+    .from('standups')
+    .select('user_id, date')
+    .eq('guild_id', guildId)
+    .gte('date', startDateStr)
+    .lte('date', endDateStr);
+  if (error) throw error;
+  const dayCounts = new Map<string, Set<string>>();
+  for (const row of data || []) {
+    if (!dayCounts.has(row.user_id)) dayCounts.set(row.user_id, new Set());
+    dayCounts.get(row.user_id)!.add(row.date);
+  }
+  return [...dayCounts.entries()].map(([user_id, dates]) => ({
+    user_id,
+    submitted_days: dates.size,
+  }));
 }
 
 export function getTodayISOString(): string {

@@ -251,7 +251,7 @@ export async function handleStandupCommand(interaction: ChatInputCommandInteract
   const userId = interaction.user.id;
   const dateStr = getTodayISOString();
 
-  const existing = getUserTodayStandup(userId, guildId, dateStr);
+  const existing = await getUserTodayStandup(userId, guildId, dateStr);
   const draft = getOrCreateDraft(userId, guildId);
   if (existing) {
     draft.todayTasks = parseTasksFromRecord(existing.today, 'today');
@@ -481,7 +481,7 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
     let messageId: string | undefined;
     let threadId: string | undefined;
 
-    const existingRecord = getUserTodayStandup(userId, guildId, dateStr);
+    const existingRecord = await getUserTodayStandup(userId, guildId, dateStr);
     const postedEmbed = buildSubmittedEmbed(displayName, dateStr, embedColor, fields);
 
     const isGuildTextChannel = channel instanceof TextChannel || channel instanceof NewsChannel;
@@ -531,7 +531,7 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
     }
 
     try {
-      upsertStandup({
+      await upsertStandup({
         user_id: userId,
         guild_id: guildId,
         date: dateStr,
@@ -807,7 +807,7 @@ export async function fetchGuildRoster(
     if (cachedIds.length > 0) return cachedIds;
   }
 
-  return getActiveRoster(guildId, rosterWindowDays);
+  return await getActiveRoster(guildId, rosterWindowDays);
 }
 
 export async function handleTeamStatusCommand(interaction: ChatInputCommandInteraction) {
@@ -822,7 +822,7 @@ export async function handleTeamStatusCommand(interaction: ChatInputCommandInter
     config.rosterWindowDays
   );
 
-  const todayStandups = getTodayStandups(guildId, todayStr);
+  const todayStandups = await getTodayStandups(guildId, todayStr);
   const submittedMap = new Map(todayStandups.map((s) => [s.user_id, s]));
 
   const postedList: string[] = [];
@@ -884,7 +884,7 @@ export async function handleHistoryCommand(interaction: ChatInputCommandInteract
   const targetUser = interaction.options.getUser('member') || interaction.user;
   const days = interaction.options.getInteger('days') || 14;
 
-  const historyRecords = getUserHistory(guildId, targetUser.id, days);
+  const historyRecords = await getUserHistory(guildId, targetUser.id, days);
 
   if (historyRecords.length === 0) {
     await interaction.editReply({
@@ -934,7 +934,7 @@ export async function handleKpiReportCommand(interaction: ChatInputCommandIntera
     config.rosterWindowDays
   );
 
-  const kpiData = generateMonthlyKpiReport(
+  const kpiData = await generateMonthlyKpiReport(
     guildId,
     year,
     monthInput,
